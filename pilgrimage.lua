@@ -6,19 +6,20 @@
 --   and space.
 -- The Shrike travels too.
 
-local MusicUtil = require "musicutil"
+local MusicUtil    = require "musicutil"
+local MollyThePoly = require "molly_the_poly/lib/molly_the_poly_engine"
 
 local rnd = include "lib/random"
 
-local CLOCK_DIVS = { 1/64, 1/32, 1/16, 1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32, 64 }
-local seqs = {}
-local seq_idx = nil
-local preview_idx = nil
-local step_idx = 0
+local CLOCK_DIVS    = { 1/64, 1/32, 1/16, 1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32, 64 }
+local seqs          = {}
+local seq_idx       = nil
+local preview_idx   = nil
+local step_idx      = 0
 local edit_note_idx = 1
-local alt = false
+local alt           = false
 
-engine.name = "PolyPerc"
+engine.name = "MollyThePoly"
 
 function choose_from_buckets (buckets, rand)
   local max = 0
@@ -84,8 +85,10 @@ local function loop()
     clock.sync(CLOCK_DIVS[params:get("clock_div")])
 
     step_idx = util.wrap(step_idx + 1, 1, #seqs[seq_idx])
+    engine.noteOffAll()
     if seqs[seq_idx][step_idx] ~= -1 then
-      engine.hz(MusicUtil.note_num_to_freq(seqs[seq_idx][step_idx]))
+      note_num = seqs[seq_idx][step_idx]
+      engine.noteOn(note_num, MusicUtil.note_num_to_freq(note_num), 127)
     end
 
     redraw()
@@ -111,6 +114,7 @@ function init()
     default=6
   }
 
+  params:add_group("Sequences", 272)
   for i=1,16 do
     prefix = "seq_"..i.."_"
     params:add_number(prefix.."seed", prefix.."seed", 1, math.maxinteger, 1)
@@ -132,24 +136,9 @@ function init()
     regen_seq(i)
   end
 
-  cs_CUT = controlspec.new(50,5000,'exp',0,500,'hz')
-  params:add{
-    type="control", id="cutoff", controlspec=cs_CUT,
-    action=function()
-      engine.cutoff(params:get("cutoff"))
-    end
-  }
-  cs_REL = controlspec.new(0.1,10,'lin',0,0.5,'s')
-  params:add{
-    type="control", id="release", controlspec=cs_REL,
-    action=function()
-      engine.release(params:get("release"))
-    end
-  }
+  params:add_group("Synth", 46) -- 46 is hardcoded to the number of params in molly_the_poly
+  MollyThePoly.add_params()
 
-  engine.amp(1.0)
-  engine.cutoff(params:get("cutoff"))
-  engine.release(params:get("release"))
   seq_idx = 1
   clock.run(loop)
 end
