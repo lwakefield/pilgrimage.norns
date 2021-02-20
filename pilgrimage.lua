@@ -121,9 +121,9 @@ function init()
     params:set_action(prefix.."seed", function() regen_seq(i) end)
     params:add_number(prefix.."len", prefix.."len", 1, 128, 16)
     params:set_action(prefix.."len", function() regen_seq(i) end)
-    params:add_number(prefix.."upper_bound", prefix.."upper_bound", 0, 48, 12)
+    params:add_number(prefix.."upper_bound", prefix.."upper_bound", 0, 24, 12)
     params:set_action(prefix.."upper_bound", function() regen_seq(i) end)
-    params:add_number(prefix.."lower_bound", prefix.."lower_bound", 0, 48, 0)
+    params:add_number(prefix.."lower_bound", prefix.."lower_bound", 0, 24, 0)
     params:set_action(prefix.."lower_bound", function() regen_seq(i) end)
     params:add_number(prefix.."rest_chance", prefix.."rest_chance", 0, 100, 10)
     params:set_action(prefix.."rest_chance", function() regen_seq(i) end)
@@ -170,7 +170,7 @@ function enc(n,d)
     local key = edit_note_idx == 0 and prefix.."rest_chance" or prefix.."note_"..edit_note_idx.."_chance"
     params:delta(key, d)
   end
-  if n==3 and alt==false then
+  if n==3 and alt==true then
     params:delta(prefix.."seed", d)
   end
 
