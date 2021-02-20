@@ -1,120 +1,91 @@
 -- Pilgrimage
+--
+--
 -- Seven pilgims walk,
--- Traveling through time and space.
+-- Traveling through time
+--   and space.
 -- The Shrike travels too.
-
-function unrequire(name)
-  package.loaded[name] = nil
-  _G[name] = nil
-end
-unrequire("musicutil")
 
 local MusicUtil = require "musicutil"
 
-local selected = 1
-local pilgrims = {
-  "consul",
-  "hoyt",
-  "kassad",
-  "lamia",
-  "het",
-  "martin",
-  "sol",
-  "shrike"
-}
-local last_pilgrimage = {
-  consul = -1,
-  hoyt   = -1,
-  kassad = -1,
-  lamia  = -1,
-  het    = -1,
-  martin = -1,
-  sol    = -1,
-  shrike = -1
-}
+local rnd = include "lib/random"
+
+local CLOCK_DIVS = { 1/64, 1/32, 1/16, 1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32, 64 }
+local seqs = {}
+local seq_idx = nil
+local preview_idx = nil
+local step_idx = 0
+local edit_note_idx = 1
+local alt = false
 
 engine.name = "PolyPerc"
 
-function scale()
+function choose_from_buckets (buckets, rand)
+  local max = 0
+  for i=1,#buckets do max = max+buckets[i] end
+
+  choice = rand() * max
+
+  local acc = 0
+  for i=1,#buckets do
+    if choice < acc+buckets[i] then return i end
+    acc = acc + buckets[i]
+  end
+
+  return -1
+end
+
+local function local_scale()
+  return MusicUtil.generate_scale(params:get("root"), params:string("scale"), 1)
+end
+local function global_scale()
   return MusicUtil.generate_scale(24 + params:get("root") % 12, params:string("scale"), 8)
 end
 
-function transpose_from_root(amt)
-  root_idx = tab.key(scale(), params:get("root"))
-  idx = util.clamp(root_idx + amt, 1, #scale())
-  return scale()[idx]
-end
+local function regen_seq(id)
+  local r = rnd()
+  r:seed(params:get("seq_"..id.."_seed"))
 
-function who()
-  max = 0
-  max = max + params:get("consul_chance")
-  max = max + params:get("hoyt_chance")
-  max = max + params:get("kassad_chance")
-  max = max + params:get("lamia_chance")
-  max = max + params:get("het_chance")
-  max = max + params:get("martin_chance")
-  max = max + params:get("sol_chance")
-  max = max + params:get("shrike_chance")
-  choice = math.floor(math.random() * max)
+  local scale_len = #local_scale() - 1
+  local full_scale = global_scale()
 
-  acc = 0
-  if choice >= acc and choice < acc + params:get("consul_chance") then
-    return "consul"
+  local buckets = {}
+
+  local root_idx = tab.key(full_scale, params:get("root"))
+  for i=1, #full_scale-1 do
+    if full_scale[i] < params:get("root") - params:get("seq_"..id.."_lower_bound") then
+      buckets[i] = 0
+    elseif full_scale[i] > params:get("root") + params:get("seq_"..id.."_upper_bound") then
+      buckets[i] = 0
+    else
+      dist_from_root = (i-root_idx) % scale_len
+      buckets[i] = params:get("seq_"..id.."_note_"..(dist_from_root+1).."_chance")
+    end
   end
-  acc = acc + params:get("consul_chance")
 
-  if choice >= acc and choice < acc + params:get("hoyt_chance") then
-    return "hoyt"
+  local seq_len = params:get("seq_"..id.."_len")
+  local seq = {}
+  for i=1,seq_len do
+    should_rest = r:next_float() * 100 < params:get("seq_1_rest_chance")
+    bucket = choose_from_buckets(buckets, function() return r:next_float() end)
+    if should_rest or bucket == -1 then
+      seq[i] = -1
+    else
+      seq[i] = full_scale[bucket]
+    end
   end
-  acc = acc + params:get("hoyt_chance")
 
-  if choice >= acc and choice < acc + params:get("kassad_chance") then
-    return "kassad"
-  end
-  acc = acc + params:get("kassad_chance")
-
-  if choice >= acc and choice < acc + params:get("lamia_chance") then
-    return "lamia"
-  end
-  acc = acc + params:get("lamia_chance")
-
-  if choice >= acc and choice < acc + params:get("het_chance") then
-    return "het"
-  end
-  acc = acc + params:get("het_chance")
-
-  if choice >= acc and choice < acc + params:get("martin_chance") then
-    return "martin"
-  end
-  acc = acc + params:get("martin_chance")
-
-  if choice >= acc and choice < acc + params:get("sol_chance") then
-    return "sol"
-  end
-  acc = acc + params:get("sol_chance")
-
-  return "shrike"
+  seqs[id] = seq
+  return seq
 end
 
 local function loop()
   while true do
-    clock.sync(params:get("div"))
-    
-    w = who()
-    last_pilgrimage[w] = util.time()
-    if w ~= "shrike" then
-      t = params:get(w .. "_transpose")
-      n = transpose_from_root(t)
+    clock.sync(CLOCK_DIVS[params:get("clock_div")])
 
-      if 100*math.random() <= params:get("chord_frequency") then
-        chords = MusicUtil.chord_types_for_note(n, params:get("root"), params:string("scale"))
-        c = MusicUtil.generate_chord(n, chords[1])
-        for k,v in pairs(c) do
-          engine.hz(MusicUtil.note_num_to_freq(v))
-        end
-      else
-        engine.hz(MusicUtil.note_num_to_freq(n))
-      end
+    step_idx = util.wrap(step_idx + 1, 1, #seqs[seq_idx])
+    if seqs[seq_idx][step_idx] ~= -1 then
+      engine.hz(MusicUtil.note_num_to_freq(seqs[seq_idx][step_idx]))
     end
 
     redraw()
@@ -127,33 +98,39 @@ function init()
     min=24, max=128, default=60,
     formatter=function (p)return MusicUtil.note_num_to_name(p:get(), true)end
   }
+  params:set_action("root", function() for i=1,#seqs do regen_seq(i) end end)
   params:add{
     type="number", id="scale",
-    min=1, max=#MusicUtil.SCALES, default=2,
+    min=1, max=#MusicUtil.SCALES, default=1,
     formatter=function (p) return MusicUtil.SCALES[p:get()].name end
   }
+  params:set_action("scale", function() for i=1,#seqs do regen_seq(i) end end)
+
   params:add{
-    type="option", id="div", options={ 1/32, 1/16, 1/8, 1/4, 1/2, 1, 2, 4, 8, 16},
-    default=3
+    type="option", id="clock_div", options=CLOCK_DIVS,
+    default=6
   }
-  params:add{type="number", id="consul_chance", min=0, max=100, default=3}
-  params:add{type="number", id="hoyt_chance",   min=0, max=100, default=1}
-  params:add{type="number", id="kassad_chance", min=0, max=100, default=1}
-  params:add{type="number", id="lamia_chance",  min=0, max=100, default=1}
-  params:add{type="number", id="het_chance",    min=0, max=100, default=1}
-  params:add{type="number", id="martin_chance", min=0, max=100, default=1}
-  params:add{type="number", id="sol_chance",    min=0, max=100, default=1}
-  params:add{type="number", id="shrike_chance", min=0, max=100, default=3}
 
-  params:add{type="number", id="consul_transpose", min=-12, max=12, default=0}
-  params:add{type="number", id="hoyt_transpose",   min=-12, max=12, default=2}
-  params:add{type="number", id="kassad_transpose", min=-12, max=12, default=-2}
-  params:add{type="number", id="lamia_transpose",  min=-12, max=12, default=3}
-  params:add{type="number", id="het_transpose",    min=-12, max=12, default=-3}
-  params:add{type="number", id="martin_transpose", min=-12, max=12, default=5}
-  params:add{type="number", id="sol_transpose",    min=-12, max=12, default=7}
-
-  params:add{type="number", id="chord_frequency", min=0, max=100, default=10}
+  for i=1,16 do
+    prefix = "seq_"..i.."_"
+    params:add_number(prefix.."seed", prefix.."seed", 1, math.maxinteger, 1)
+    params:set_action(prefix.."seed", function() regen_seq(i) end)
+    params:add_number(prefix.."len", prefix.."len", 1, 128, 16)
+    params:set_action(prefix.."len", function() regen_seq(i) end)
+    params:add_number(prefix.."upper_bound", prefix.."upper_bound", 0, 48, 12)
+    params:set_action(prefix.."upper_bound", function() regen_seq(i) end)
+    params:add_number(prefix.."lower_bound", prefix.."lower_bound", 0, 48, 0)
+    params:set_action(prefix.."lower_bound", function() regen_seq(i) end)
+    params:add_number(prefix.."rest_chance", prefix.."rest_chance", 0, 100, 10)
+    params:set_action(prefix.."rest_chance", function() regen_seq(i) end)
+    params:hide(prefix.."rest_chance")
+    for j=1,12 do
+      params:add_number(prefix.."note_"..j.."_chance", prefix.."note_"..j.."_chance", 0, 100, 50)
+      params:set_action(prefix.."note_"..j.."_chance", function() regen_seq(i) end)
+      params:hide(prefix.."note_"..j.."_chance")
+    end
+    regen_seq(i)
+  end
 
   cs_CUT = controlspec.new(50,5000,'exp',0,500,'hz')
   params:add{
@@ -173,84 +150,88 @@ function init()
   engine.amp(1.0)
   engine.cutoff(params:get("cutoff"))
   engine.release(params:get("release"))
+  seq_idx = 1
   clock.run(loop)
-  clock.run(function ()
-    while true do
-      redraw()
-      clock.sleep(1/30)
-    end
-  end)
 end
 
 function key(n,z)
+  if n==1 then
+    alt = z==1
+
+    if alt==true  then preview_idx = seq_idx end
+    if alt==false then seq_idx = preview_idx end
+  end
+
+  if n==2 and z==1 and alt==false then edit_note_idx = util.wrap(edit_note_idx - 1, 0, #local_scale()-1) end
+  if n==3 and z==1 and alt==false then edit_note_idx = util.wrap(edit_note_idx + 1, 0, #local_scale()-1) end
+
+  redraw()
 end
 
 function enc(n,d)
-  if n == 1 then
-    selected = util.wrap(selected + d, 1, 8)
-  elseif n == 2 then
-    params:delta(pilgrims[selected] .. "_chance", d)
-  elseif n == 3 and pilgrims[selected] ~= "shrike" then
-    params:delta(pilgrims[selected] .. "_transpose", d)
+  local prefix = "seq_"..seq_idx.."_"
+
+  if n==1 and alt==false then
+    seq_idx = util.clamp(seq_idx + d, 1, #seqs)
   end
+  if n==1 and alt==true then
+    preview_idx = util.clamp(preview_idx + d, 1, #seqs)
+  end
+  if n==2 and alt==false then
+    local key = edit_note_idx == 0 and prefix.."rest_chance" or prefix.."note_"..edit_note_idx.."_chance"
+    params:delta(key, d)
+  end
+  if n==3 and alt==false then
+    params:delta(prefix.."seed", d)
+  end
+
+  redraw()
 end
 
 function redraw()
   screen.clear()
 
-  function get_level(w)
-    delta = 3 - (util.time() - last_pilgrimage[w])
-    delta = util.clamp(delta, 0, 5)
-    return util.round(util.linexp(0, 5, 1, 15, delta))
+  for i=1, #seqs do
+    screen.level((seq_idx == i or preview_idx == i) and 15 or 1)
+    screen.move((i-1) * 128/#seqs, 1)
+    screen.line_rel(128/#seqs - 1, 0)
+    screen.stroke()
   end
 
-  function get_text(w)
-    str = w
-    str = str.."/"..params:get(w.."_chance")
-    if w ~= "shrike" then
-      str = str.."/"..MusicUtil.note_num_to_name(transpose_from_root(params:get(w.."_transpose")), true)
+  local function draw_chance(title, amt, selected, pos)
+    screen.level(selected and 15 or 1)
+
+    screen.move(pos[1], pos[2])
+    screen.text(title)
+    screen.move(pos[1], pos[2] + 2)
+    screen.line_rel(12*amt/100, 0)
+    screen.stroke()
+  end
+
+  local draw_seq_idx = alt and preview_idx or seq_idx
+
+  draw_chance("0", params:get("seq_"..draw_seq_idx.."_rest_chance"), edit_note_idx == 0, {0, 10})
+  local s = local_scale()
+  for i=1, #s-1 do
+    draw_chance(
+      MusicUtil.note_num_to_name(s[i]),
+      params:get("seq_"..draw_seq_idx.."_note_"..i.."_chance"),
+      i == edit_note_idx,
+      {i*14, 10}
+    )
+  end
+
+  seq = seqs[draw_seq_idx]
+  root = params:get("root")
+  for i=1,#seq do
+    screen.level(i == step_idx and 15 or 1)
+    if seq[i] ~= -1 then
+      dist_from_root = seq[i] - root
+      screen.move((i-1) * (128/#seq), 40 - dist_from_root)
+      screen.line_rel((128/#seq), 0)
+      screen.stroke()
     end
-    return str
   end
-
-  selected_x = math.floor((selected-1) / 4)
-  selected_y = (selected-1) % 4
-  screen.level(15)
-  screen.move(selected_x * 60, 13 + selected_y * 15)
-  screen.line_rel(58, 0)
-  screen.stroke()
-
-  screen.level(get_level("consul"))
-  screen.move(0,10)
-  screen.text(get_text("consul"))
-
-  screen.level(get_level("hoyt"))
-  screen.move(0,25)
-  screen.text(get_text("hoyt"))
-
-  screen.level(get_level("kassad"))
-  screen.move(0,40)
-  screen.text(get_text("kassad"))
-
-  screen.level(get_level("lamia"))
-  screen.move(0,55)
-  screen.text(get_text("lamia"))
-
-  screen.level(get_level("het"))
-  screen.move(65,10)
-  screen.text(get_text("het"))
-
-  screen.level(get_level("martin"))
-  screen.move(65,25)
-  screen.text(get_text("martin"))
-
-  screen.level(get_level("sol"))
-  screen.move(65,40)
-  screen.text(get_text("sol"))
-
-  screen.level(get_level("shrike"))
-  screen.move(65,55)
-  screen.text(get_text("shrike"))
 
   screen.update()
 end
