@@ -8,6 +8,7 @@
 
 local MusicUtil    = require "musicutil"
 local MollyThePoly = require "molly_the_poly/lib/molly_the_poly_engine"
+local lfo          = require "otis/lib/hnds"
 
 local rnd = include "lib/random"
 
@@ -18,6 +19,7 @@ local preview_idx   = nil
 local step_idx      = 0
 local edit_note_idx = 1
 local alt           = false
+local lfo_targets   = {"none"}
 
 engine.name = "MollyThePoly"
 
@@ -95,7 +97,21 @@ local function loop()
   end
 end
 
-function init()
+function lfo.process()
+  for i=1,4 do
+    local target = lfo_targets[params:get(i.."lfo_target")]
+
+    if target ~= "none" and params:get(i .. "lfo") == 2 then
+      local range = params:get_range(target)
+      local val = util.linlin(-1, 1, range[1], range[2], lfo[i].slope)
+      params:set(target, val)
+    end
+  end
+
+  redraw()
+end
+
+function init_params()
   params:add{
     type="number", id="root",
     min=24, max=128, default=60,
@@ -114,12 +130,13 @@ function init()
     default=6
   }
 
-  params:add_group("Sequences", 272)
-  for i=1,16 do
+  local num_seqs = 16
+  params:add_group("Sequences", num_seqs*17)
+  for i=1,num_seqs do
     prefix = "seq_"..i.."_"
     params:add_number(prefix.."seed", prefix.."seed", 1, math.maxinteger, 1)
     params:set_action(prefix.."seed", function() regen_seq(i) end)
-    params:add_number(prefix.."len", prefix.."len", 1, 128, 16)
+    params:add_number(prefix.."len", prefix.."len", 1, 32, 16)
     params:set_action(prefix.."len", function() regen_seq(i) end)
     params:add_number(prefix.."upper_bound", prefix.."upper_bound", 0, 24, 12)
     params:set_action(prefix.."upper_bound", function() regen_seq(i) end)
@@ -128,18 +145,35 @@ function init()
     params:add_number(prefix.."rest_chance", prefix.."rest_chance", 0, 100, 10)
     params:set_action(prefix.."rest_chance", function() regen_seq(i) end)
     params:hide(prefix.."rest_chance")
+
+    lfo_targets[#lfo_targets+1] = prefix.."upper_bound"
+    lfo_targets[#lfo_targets+1] = prefix.."lower_bound"
+    lfo_targets[#lfo_targets+1] = prefix.."rest_chance"
+
     for j=1,12 do
       params:add_number(prefix.."note_"..j.."_chance", prefix.."note_"..j.."_chance", 0, 100, 50)
       params:set_action(prefix.."note_"..j.."_chance", function() regen_seq(i) end)
       params:hide(prefix.."note_"..j.."_chance")
+      lfo_targets[#lfo_targets+1] = prefix.."note_"..j.."_chance"
     end
+
     regen_seq(i)
   end
 
   params:add_group("Synth", 46) -- 46 is hardcoded to the number of params in molly_the_poly
   MollyThePoly.add_params()
+end
+
+function init()
+  init_params()
 
   seq_idx = 1
+
+  for i=1,4 do
+    lfo[i].lfo_targets = lfo_targets
+  end
+  lfo.init()
+
   clock.run(loop)
 end
 
