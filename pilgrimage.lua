@@ -12,7 +12,7 @@ local MollyThePoly = require "molly_the_poly/lib/molly_the_poly_engine"
 local rnd = include "lib/random"
 local lfo = include "lib/lfo"
 
-local CLOCK_DIVS    = { 1/64, 1/32, 1/16, 1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32, 64 }
+local CLOCK_DIVS    = { 1/16, 1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32, 64 }
 local seqs          = {}
 local seq_idx       = nil
 local preview_idx   = nil
@@ -43,7 +43,8 @@ local function regen_seq(id)
     elseif full_scale[i] > params:get("root") + params:get("seq_"..id.."_upper_bound") then
     else
       dist_from_root = (i-root_idx) % scale_len
-      for j=1, params:get("seq_"..id.."_note_"..(dist_from_root+1).."_chance") do
+      -- we down sample the chance by 10 to improve performance
+      for j=1, params:get("seq_"..id.."_note_"..(dist_from_root+1).."_chance")/10 do
         buckets[#buckets+1] = full_scale[i]
       end
     end
@@ -123,7 +124,7 @@ function init_params()
 
   params:add{
     type="option", id="clock_div", options=CLOCK_DIVS,
-    default=6
+    default=4
   }
 
   local num_seqs = 16
@@ -134,7 +135,7 @@ function init_params()
     params:set_action(prefix.."seed", function() regen_seq(i) end)
     params:add_binary(prefix.."infinite", prefix.."infinite", "toggle")
     params:set_action(prefix.."infinite", function() regen_seq(i) end)
-    params:add_number(prefix.."len", prefix.."len", 1, 32, 16)
+    params:add_number(prefix.."len", prefix.."len", 1, 16, 16)
     params:set_action(prefix.."len", function() regen_seq(i) end)
     params:add_number(prefix.."upper_bound", prefix.."upper_bound", 0, 24, 12)
     params:set_action(prefix.."upper_bound", function() regen_seq(i) end)
