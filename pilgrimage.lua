@@ -8,9 +8,9 @@
 
 local MusicUtil    = require "musicutil"
 local MollyThePoly = require "molly_the_poly/lib/molly_the_poly_engine"
-local lfo          = require "otis/lib/hnds"
 
 local rnd = include "lib/random"
+local lfo = include "lib/lfo"
 
 local CLOCK_DIVS    = { 1/64, 1/32, 1/16, 1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32, 64 }
 local seqs          = {}
@@ -23,21 +23,6 @@ local lfo_targets   = {"none"}
 
 engine.name = "MollyThePoly"
 
-function choose_from_buckets (buckets, rand)
-  local max = 0
-  for i=1,#buckets do max = max+buckets[i] end
-
-  choice = rand() * max
-
-  local acc = 0
-  for i=1,#buckets do
-    if choice < acc+buckets[i] then return i end
-    acc = acc + buckets[i]
-  end
-
-  return -1
-end
-
 local function local_scale()
   return MusicUtil.generate_scale(params:get("root"), params:string("scale"), 1)
 end
@@ -49,20 +34,18 @@ local function regen_seq(id)
   local r = rnd()
   r:seed(params:get("seq_"..id.."_seed"))
 
+  local buckets = {}
   local scale_len = #local_scale() - 1
   local full_scale = global_scale()
-
-  local buckets = {}
-
   local root_idx = tab.key(full_scale, params:get("root"))
   for i=1, #full_scale-1 do
     if full_scale[i] < params:get("root") - params:get("seq_"..id.."_lower_bound") then
-      buckets[i] = 0
     elseif full_scale[i] > params:get("root") + params:get("seq_"..id.."_upper_bound") then
-      buckets[i] = 0
     else
       dist_from_root = (i-root_idx) % scale_len
-      buckets[i] = params:get("seq_"..id.."_note_"..(dist_from_root+1).."_chance")
+      for j=1, params:get("seq_"..id.."_note_"..(dist_from_root+1).."_chance") do
+        buckets[#buckets+1] = full_scale[i]
+      end
     end
   end
 
@@ -70,11 +53,11 @@ local function regen_seq(id)
   local seq = {}
   for i=1,seq_len do
     should_rest = r:next_float() * 100 < params:get("seq_1_rest_chance")
-    bucket = choose_from_buckets(buckets, function() return r:next_float() end)
-    if should_rest or bucket == -1 then
+    note = buckets[math.ceil(r:next_float() * #buckets)]
+    if should_rest or #buckets == 0 then
       seq[i] = -1
     else
-      seq[i] = full_scale[bucket]
+      seq[i] = note
     end
   end
 
@@ -86,7 +69,20 @@ local function loop()
   while true do
     clock.sync(CLOCK_DIVS[params:get("clock_div")])
 
-    step_idx = util.wrap(step_idx + 1, 1, #seqs[seq_idx])
+    if params:get("seq_"..seq_idx.."_infinite") == 1 then
+      step_idx = 1
+      local r = rnd()
+      r:seed(params:get("seq_"..seq_idx.."_seed"))
+      -- there are 2 calls to r:next_float() per seq step
+      -- so if we move the seed forward two steps, it makes the sequence scroll
+      -- infinitely
+      r:next_float()
+      r:next_float()
+      params:set("seq_"..seq_idx.."_seed", r.state)
+    else
+      step_idx = util.wrap(step_idx + 1, 1, #seqs[seq_idx])
+    end
+
     engine.noteOffAll()
     if seqs[seq_idx][step_idx] ~= -1 then
       note_num = seqs[seq_idx][step_idx]
@@ -131,11 +127,13 @@ function init_params()
   }
 
   local num_seqs = 16
-  params:add_group("Sequences", num_seqs*17)
+  params:add_group("Sequences", num_seqs*18)
   for i=1,num_seqs do
     prefix = "seq_"..i.."_"
-    params:add_number(prefix.."seed", prefix.."seed", 1, math.maxinteger, 1)
+    params:add_number(prefix.."seed", prefix.."seed", math.mininteger, math.maxinteger, 1)
     params:set_action(prefix.."seed", function() regen_seq(i) end)
+    params:add_binary(prefix.."infinite", prefix.."infinite", "toggle")
+    params:set_action(prefix.."infinite", function() regen_seq(i) end)
     params:add_number(prefix.."len", prefix.."len", 1, 32, 16)
     params:set_action(prefix.."len", function() regen_seq(i) end)
     params:add_number(prefix.."upper_bound", prefix.."upper_bound", 0, 24, 12)
