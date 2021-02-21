@@ -1,10 +1,11 @@
--- Pilgrimage
---
---
--- Seven pilgims walk,
--- Traveling through time
---   and space.
--- The Shrike travels too.
+-- , .  .   .    .     .      .       .
+-- . ,  .   .    .     .      .       .
+-- . .  ,   .    .     .      .       .
+-- . .  .   ,    .     .      .       .
+-- . .  .   .    ,     .      .       .
+-- . .  .   .    .     ,      .       .
+-- . .  .   .    .     .      ,       .
+-- . .  .   .    .     .      .       ,
 
 local MusicUtil    = require "musicutil"
 local MollyThePoly = require "molly_the_poly/lib/molly_the_poly_engine"
